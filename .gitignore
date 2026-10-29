@@ -1,0 +1,39 @@
+# Local Groot repositories and scratch files
+.groot/
+/archive/
+/hello.txt
+/notes.txt
+
+# CMake and CLion build output
+/build/
+/cmake-build-*/
+/out/
+/.idea/
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+Testing/
+compile_commands.json
+cmake_install.cmake
+CTestTestfile.cmake
+build.ninja
+.ninja_deps
+.ninja_log
+
+# Compiler and test artifacts outside build directories
+*.exe
+*.dll
+*.obj
+*.o
+*.a
+*.lib
+*.pdb
+*.gcda
+*.gcno
+
+# Editor and operating system files
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

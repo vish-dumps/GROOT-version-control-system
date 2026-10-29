@@ -1,420 +1,193 @@
-#include "Repository.h"
-#include <string>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <sstream>
-#include <iomanip>
+#include "groot/repository.hpp"
+
+#include "groot/index.hpp"
+#include "groot/object_store.hpp"
+#include "groot/sha256.hpp"
+#include "groot/utils.hpp"
+
+#include <algorithm>
+#include <stdexcept>
+#include <string_view>
 
 namespace fs = std::filesystem;
 
+namespace groot {
+namespace {
 
-//finding the nearest .groot directory
+fs::path require_root(const fs::path& current_directory) {
+    const auto root = Repository::discover(current_directory);
+    if (!root) {
+        throw std::runtime_error("fatal: not a Groot repository");
+    }
+    return fs::canonical(*root);
+}
 
-fs::path Repository::findRepositoryRoot() {
+bool is_metadata(const fs::path& path) {
+    for (const auto& component : path) {
+        if (component == ".groot" || component == ".git") {
+            return true;
+        }
+    }
+    return false;
+}
 
-    fs::path current = fs::current_path();
+fs::path relative_to_root(const fs::path& root, const fs::path& path) {
+    const fs::path relative = fs::weakly_canonical(path).lexically_relative(root);
+    if (relative.empty() || relative.is_absolute() ||
+        *relative.begin() == ".." || is_metadata(relative)) {
+        throw std::runtime_error("path is outside versioned files: " + path.string());
+    }
+    return relative;
+}
+
+std::vector<fs::path> working_files(const fs::path& directory) {
+    std::vector<fs::path> files;
+    for (fs::recursive_directory_iterator it(directory), end; it != end; ++it) {
+        const auto& entry = *it;
+        if (is_metadata(entry.path().filename()) || entry.is_symlink()) {
+            it.disable_recursion_pending();
+            continue;
+        }
+        if (entry.is_regular_file()) {
+            files.push_back(entry.path());
+        }
+    }
+    return files;
+}
+
+std::string current_branch(const fs::path& root) {
+    const auto head = read_file(root / ".groot" / "HEAD");
+    constexpr std::string_view prefix = "ref: refs/heads/";
+    if (!head.starts_with(prefix) || head.size() <= prefix.size() + 1 || head.back() != '\n') {
+        throw std::runtime_error("invalid HEAD format");
+    }
+    return head.substr(prefix.size(), head.size() - prefix.size() - 1);
+}
+
+} // namespace
+
+std::optional<fs::path> Repository::discover(fs::path start) {
+    start = fs::absolute(start);
+    if (!fs::is_directory(start)) {
+        start = start.parent_path();
+    }
 
     while (true) {
-
-        if (fs::exists(current / ".groot") &&
-            fs::is_directory(current / ".groot")) {
-
-            return current;
+        const fs::path metadata = start / ".groot";
+        if (fs::exists(metadata)) {
+            if (!fs::is_directory(metadata)) {
+                throw std::runtime_error(".groot exists but is not a directory: " + metadata.string());
             }
-
-        if (current == current.root_path()) {
-            break;
+            return start;
         }
-
-        current = current.parent_path();
-    }
-
-    return {};
-}
-
-std::string simpleHash(const std::string& content) {
-
-    std::hash<std::string> hasher;
-
-    std::size_t hashValue = hasher(content);
-
-    std::stringstream stream;
-
-    stream << std::hex
-           << std::setw(16)
-           << std::setfill('0')
-           << hashValue;
-
-    return stream.str();
-}
-
-//groot log
-void Repository::log() {
-
-    fs::path root = findRepositoryRoot();
-
-    if (root.empty()) {
-        std::cout << "fatal: not a Groot repository\n";
-        return;
-    }
-
-    fs::path headPath = root / ".groot" / "HEAD";
-
-    std::ifstream headFile(headPath);
-
-    if (!headFile) {
-        std::cout << "Error: Could not read HEAD.\n";
-        return;
-    }
-
-    std::string headContent;
-    std::getline(headFile, headContent);
-
-    const std::string prefix = "ref: refs/heads/";
-
-    if (headContent.rfind(prefix, 0) != 0) {
-        std::cout << "Error: Invalid HEAD format.\n";
-        return;
-    }
-
-    std::string branchName =
-        headContent.substr(prefix.size());
-
-    fs::path branchPath =
-        root / ".groot" / "refs" / "heads" / branchName;
-
-    std::ifstream branchFile(branchPath);
-
-    if (!branchFile) {
-        std::cout << "No commits yet.\n";
-        return;
-    }
-
-    std::string commitHash;
-    std::getline(branchFile, commitHash);
-
-    if (commitHash.empty()) {
-        std::cout << "No commits yet.\n";
-        return;
-    }
-
-    fs::path objectPath =
-        root / ".groot" / "objects" / commitHash;
-
-    std::ifstream objectFile(objectPath);
-
-    if (!objectFile) {
-        std::cout << "Error: Commit object not found.\n";
-        return;
-    }
-
-    std::cout << "commit " << commitHash << '\n';
-
-    std::string line;
-
-    while (std::getline(objectFile, line)) {
-
-        if (line.rfind("message: ", 0) == 0) {
-
-            std::cout << "    "
-                      << line.substr(9)
-                      << '\n';
-
-            break;
+        if (start == start.root_path()) {
+            return std::nullopt;
         }
-    }
-
-    std::cout << '\n';
-}
-
-//groot status
-void Repository::status() {
-
-    fs::path root = findRepositoryRoot();
-
-    if (root.empty()) {
-        std::cout << "fatal: not a Groot repository\n";
-        return;
-    }
-
-    fs::path headPath = root / ".groot" / "HEAD";
-
-    std::ifstream headFile(headPath);
-
-    if (!headFile) {
-        std::cout << "Error: Could not read HEAD.\n";
-        return;
-    }
-
-    std::string headContent;
-    std::getline(headFile, headContent);
-
-    const std::string prefix = "ref: refs/heads/";
-
-    if (headContent.rfind(prefix, 0) == 0) {
-
-        std::string branchName =
-            headContent.substr(prefix.size());
-
-        std::cout << "On Groot branch: "
-                  << branchName << '\n';
-
-    } else {
-
-        std::cout << "Error: Invalid HEAD format.\n";
-        return;
-    }
-
-    fs::path indexPath = root / ".groot" / "index";
-
-    std::ifstream indexFile(indexPath);
-
-    if (!indexFile) {
-        std::cout << "Error: Could not read index.\n";
-        return;
-    }
-
-    std::string stagedFile;
-    bool hasStagedFiles = false;
-
-    while (std::getline(indexFile, stagedFile)) {
-
-        if (stagedFile.empty()) {
-            continue;
-        }
-
-        if (!hasStagedFiles) {
-            std::cout << "\nChanges to be committed:\n";
-            hasStagedFiles = true;
-        }
-
-        std::cout << "    " << stagedFile << '\n';
-    }
-
-    if (!hasStagedFiles) {
-        std::cout << "Nothing to commit, working tree clean.\n";
+        start = start.parent_path();
     }
 }
 
-// groot commit
-void Repository::commit(const std::string& message) {
-
-    fs::path root = findRepositoryRoot();
-
-    if (root.empty()) {
-        std::cout << "fatal: not a Groot repository\n";
-        return;
+fs::path Repository::init(const fs::path& root) {
+    const fs::path absolute_root = fs::absolute(root);
+    if (!fs::is_directory(absolute_root)) {
+        throw std::runtime_error("repository directory does not exist: " + absolute_root.string());
+    }
+    if (discover(absolute_root)) {
+        throw std::runtime_error("a Groot repository already exists here or in a parent directory");
     }
 
-    fs::path indexPath = root / ".groot" / "index";
-
-    std::ifstream indexFile(indexPath);
-
-    if (!indexFile) {
-        std::cout << "Error: Could not read index.\n";
-        return;
-    }
-
-    std::string stagedFile;
-    std::stringstream commitContent;
-
-    bool hasStagedFiles = false;
-
-    while (std::getline(indexFile, stagedFile)) {
-
-        if (stagedFile.empty()) {
-            continue;
-        }
-
-        hasStagedFiles = true;
-
-        commitContent << stagedFile << '\n';
-    }
-
-    indexFile.close();
-
-    if (!hasStagedFiles) {
-        std::cout << "Nothing to commit.\n";
-        return;
-    }
-
-    commitContent << "message: " << message << '\n';
-
-    std::string content = commitContent.str();
-
-    std::string commitHash = simpleHash(content);
-
-    fs::path objectPath =
-        root / ".groot" / "objects" / commitHash;
-
-    std::ofstream objectFile(objectPath);
-
-    if (!objectFile) {
-        std::cout << "Error: Could not create commit object.\n";
-        return;
-    }
-
-    objectFile << content;
-    objectFile.close();
-
-    fs::path headPath = root / ".groot" / "HEAD";
-
-    std::ifstream headFile(headPath);
-
-    if (!headFile) {
-        std::cout << "Error: Could not read HEAD.\n";
-        return;
-    }
-
-    std::string headContent;
-    std::getline(headFile, headContent);
-
-    const std::string prefix = "ref: refs/heads/";
-
-    if (headContent.rfind(prefix, 0) != 0) {
-        std::cout << "Error: Invalid HEAD format.\n";
-        return;
-    }
-
-    std::string branchName =
-        headContent.substr(prefix.size());
-
-    fs::path branchPath =
-        root / ".groot" / "refs" / "heads" / branchName;
-
-    std::ofstream branchFile(branchPath);
-
-    if (!branchFile) {
-        std::cout << "Error: Could not update branch.\n";
-        return;
-    }
-
-    branchFile << commitHash << '\n';
-
-    std::cout << "["
-              << branchName
-              << " "
-              << commitHash
-              << "] "
-              << message
-              << '\n';
+    const fs::path metadata = absolute_root / ".groot";
+    fs::create_directories(metadata / "objects");
+    fs::create_directories(metadata / "commits");
+    fs::create_directories(metadata / "refs" / "heads");
+    write_file(metadata / "HEAD", "ref: refs/heads/main\n");
+    write_file(metadata / "index", "");
+    write_file(metadata / "refs" / "heads" / "main", "");
+    return metadata;
 }
 
-//groot add
-void Repository::add(const std::string& fileName) {
+std::size_t Repository::add(const fs::path& path, const fs::path& current_directory) {
+    const auto root = require_root(current_directory);
+    if (path.empty()) {
+        throw std::runtime_error("path does not exist");
+    }
+    const auto requested = fs::absolute(current_directory / path);
+    if (fs::is_symlink(requested)) {
+        throw std::runtime_error("symbolic links are not supported: " + requested.string());
+    }
+    const auto candidate = fs::weakly_canonical(requested);
+    const auto scope = relative_to_root(root, candidate);
 
-    fs::path root = findRepositoryRoot();
+    Index index(root);
+    index.load();
+    ObjectStore objects(root);
 
-    if (root.empty()) {
-        std::cout << "fatal: not a Groot repository\n";
-        return;
+    if (!fs::exists(candidate)) {
+        const auto key = scope.generic_string();
+        if (!index.contains(key)) {
+            throw std::runtime_error("path does not exist: " + path.string());
+        }
+        index.remove(key); // A missing indexed file is staged for deletion.
+        index.save();
+        return 1;
     }
 
-    fs::path filePath = fs::current_path() / fileName;
-
-    if (!fs::exists(filePath)) {
-        std::cout << "fatal: pathspec '"
-                  << fileName
-                  << "' did not match any files\n";
-        return;
+    if (fs::is_regular_file(candidate)) {
+        const auto key = scope.generic_string();
+        index.set(key, objects.store(read_file(candidate)));
+        index.save();
+        return 1;
+    }
+    if (!fs::is_directory(candidate)) {
+        throw std::runtime_error("path is not a regular file or directory: " + path.string());
     }
 
-    if (!fs::is_regular_file(filePath)) {
-        std::cout << "fatal: '"
-                  << fileName
-                  << "' is not a regular file\n";
-        return;
+    std::size_t changed = 0;
+    for (const auto& file : working_files(candidate)) {
+        const auto key = relative_to_root(root, file).generic_string();
+        index.set(key, objects.store(read_file(file)));
+        ++changed;
     }
-
-    fs::path indexPath = root / ".groot" / "index";
-
-    std::ifstream indexRead(indexPath);
-
-    if (!indexRead) {
-        std::cout << "Error: Could not read index.\n";
-        return;
-    }
-
-    std::string stagedFile;
-    bool alreadyStaged = false;
-
-    while (std::getline(indexRead, stagedFile)) {
-
-        if (stagedFile == fileName) {
-            alreadyStaged = true;
-            break;
+    const auto prefix = scope == "." ? std::string{} : scope.generic_string() + "/";
+    std::vector<std::string> removed;
+    for (const auto& [key, hash] : index.entries()) {
+        if ((prefix.empty() || key.starts_with(prefix)) &&
+            (!fs::is_regular_file(root / fs::path(key)) || fs::is_symlink(root / fs::path(key)))) {
+            removed.push_back(key);
         }
     }
-
-    indexRead.close();
-
-    if (alreadyStaged) {
-        std::cout << "File already staged: "
-                  << fileName << '\n';
-        return;
+    for (const auto& key : removed) {
+        index.remove(key);
+        ++changed;
     }
-
-    std::ofstream index(indexPath, std::ios::app);
-
-    if (!index) {
-        std::cout << "Error: Could not open index.\n";
-        return;
-    }
-
-    index << fileName << '\n';
-
-    std::cout << "Added file: "
-              << fileName << '\n';
+    index.save();
+    return changed;
 }
 
-//groot init
-void Repository::init() {
+Status Repository::status(const fs::path& current_directory) {
+    const auto root = require_root(current_directory);
+    Index index(root);
+    index.load();
 
-    fs::path root = findRepositoryRoot();
-
-    if (!root.empty()) {
-        std::cout << "Repository found at: "
-                  << root << '\n';
-        return;
-    }
-
-    std::cout << "No Groot repository found.\n";
-
-    fs::path repo = ".groot";
-
-    if (fs::exists(repo)) {
-
-        if (fs::is_directory(repo)) {
-            std::cout << "Groot repository already exists.\n";
-        } else {
-            std::cout << "Error: .groot exists but is not a directory.\n";
+    Status result;
+    result.branch = current_branch(root);
+    for (const auto& [key, hash] : index.entries()) {
+        result.staged.push_back(key);
+        const auto file = root / fs::path(key);
+        if (!fs::is_regular_file(file) || fs::is_symlink(file)) {
+            result.deleted.push_back(key);
+        } else if (SHA256::hash(read_file(file)) != hash) {
+            result.modified.push_back(key);
         }
-
-        return;
     }
-
-    try {
-
-        fs::create_directories(repo / "objects");
-        fs::create_directories(repo / "refs" / "heads");
-
-        std::ofstream head(repo / "HEAD");
-        std::ofstream index(repo / "index");
-        std::ofstream mainBranch(repo / "refs" / "heads" / "main");
-
-        if (!head || !index || !mainBranch) {
-            std::cout << "Error: Could not create repository files.\n";
-            return;
+    for (const auto& file : working_files(root)) {
+        const auto key = relative_to_root(root, file).generic_string();
+        if (!index.contains(key)) {
+            result.untracked.push_back(key);
         }
-        head<<"ref: refs/heads/main\n";
-
-        std::cout << "Initialized empty Groot repository.\n";
-
-    } catch (const fs::filesystem_error& e) {
-
-        std::cout << "Filesystem error: "
-                  << e.what() << '\n';
     }
+    std::sort(result.untracked.begin(), result.untracked.end());
+    return result;
 }
 
+} // namespace groot
