@@ -14,6 +14,11 @@ void print_status(const groot::Status& status) {
             std::cout << "    new file: " << path << '\n';
         }
     }
+    if (!status.staged_modified.empty() || !status.staged_deleted.empty()) {
+        if (status.staged.empty()) std::cout << "\nChanges staged for commit:\n";
+        for (const auto& path : status.staged_modified) std::cout << "    modified: " << path << '\n';
+        for (const auto& path : status.staged_deleted) std::cout << "    deleted:  " << path << '\n';
+    }
     if (!status.modified.empty() || !status.deleted.empty()) {
         std::cout << "\nChanges not staged:\n";
         for (const auto& path : status.modified) {
@@ -29,7 +34,7 @@ void print_status(const groot::Status& status) {
             std::cout << "    " << path << '\n';
         }
     }
-    if (status.staged.empty() && status.modified.empty() &&
+    if (status.staged.empty() && status.staged_modified.empty() && status.staged_deleted.empty() && status.modified.empty() &&
         status.deleted.empty() && status.untracked.empty()) {
         std::cout << "\nnothing to commit, working tree clean\n";
     }
@@ -39,7 +44,7 @@ void print_status(const groot::Status& status) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: groot <init|add|status> [path]\n";
+        std::cerr << "Usage: groot <init|add|status|commit|log> [path or -m message]\n";
         return 2;
     }
 
@@ -53,8 +58,14 @@ int main(int argc, char* argv[]) {
             std::cout << "Updated index: " << count << " path(s)\n";
         } else if (command == "status" && argc == 2) {
             print_status(groot::Repository::status());
+        } else if (command == "commit" && argc == 4 && std::string_view(argv[2]) == "-m") {
+            std::cout << "Committed " << groot::Repository::commit(argv[3]) << '\n';
+        } else if (command == "log" && argc == 2) {
+            for (const auto& record : groot::Repository::log()) {
+                std::cout << "commit " << record.hash << "\n    " << record.message << "\n\n";
+            }
         } else {
-            std::cerr << "Usage: groot <init|add|status> [path]\n";
+            std::cerr << "Usage: groot <init|add|status|commit|log> [path or -m message]\n";
             return 2;
         }
         return 0;

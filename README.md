@@ -1,6 +1,6 @@
 # Groot
 
-A lightweight Git-inspired version control system implemented from scratch in C++20. This repository currently contains **phases 1–3**: repository initialization, SHA-256 content storage, and a persistent staging index with working-tree status. Commits, diffs, branches, and merges are planned phases.
+A lightweight Git-inspired version control system implemented from scratch in C++20. This repository currently contains **phases 1–4**: repository initialization, SHA-256 content storage, a persistent staging index, and immutable snapshot commits with history. Diffs, branches, and merges are planned phases.
 
 ## Why I Built It
 
@@ -15,6 +15,10 @@ groot add -> Repository -> ObjectStore -> SHA256 -> .groot/objects/<digest>
                        \-> Index       -> .groot/index
 
 groot status -> compare Index with working files
+
+groot commit -> snapshot Index -> .groot/commits/<digest> -> refs/heads/main
+
+groot log -> follow commit parent hashes from the branch ref
 ```
 
 `Repository::discover` walks from a directory to its parents looking for `.groot`. `Repository::init` creates an empty `main` branch, a symbolic `HEAD`, and an empty index. The object store takes arbitrary bytes, computes SHA-256, and stores the bytes under the digest. The same bytes always select the same object path, so identical content is stored once. Objects are published from a temporary file with a hard link; an existing hash path is never overwritten by `ObjectStore::store`. `load` verifies the digest and reports corruption.
@@ -22,8 +26,8 @@ groot status -> compare Index with working files
 ```text
 project/.groot/
 ├── objects/          # SHA-256-named immutable file contents
-├── commits/          # reserved for phase 4
-├── refs/heads/main    # empty until the first commit
+├── commits/          # SHA-256-named immutable snapshot records
+├── refs/heads/main    # latest commit hash, empty until the first commit
 ├── HEAD               # ref: refs/heads/main
 └── index              # sorted path -> object hash entries
 ```
@@ -34,7 +38,11 @@ SHA-256 is the *identity* of stored content, not a random identifier. For exampl
 
 The index is a `std::map<path, hash>` serialized in sorted order to `.groot/index`. Each line contains a 64-character SHA-256 hash and a quoted repository-relative path. `groot add <file>` stores the file's current bytes as an immutable object and updates that path's hash in the index. It does not create a commit. `groot add .` recursively stages files under the current directory and removes missing indexed files in that subtree. Groot skips `.groot`, `.git`, and symbolic links while scanning.
 
-`groot status` hashes indexed working files to find modifications, checks for missing indexed files, and scans for untracked files. A deleted file stays in the index until it is staged for removal with `groot add <file>` or `groot add .`. Since there is no commit snapshot yet, every index entry appears as a staged new file. Phase 5 will compare HEAD with the index to distinguish staged additions, modifications, and deletions.
+`groot status` compares the latest commit with the index to report staged additions, modifications, and deletions. It also hashes indexed working files to find unstaged modifications, checks for missing indexed files, and scans for untracked files. A deleted file stays in the index until it is staged for removal with `groot add <file>` or `groot add .`.
+
+## Commits and History
+
+`groot commit -m "message"` captures the complete index as a snapshot. Each commit records its parent hash, timestamp, message, and sorted path-to-object mappings. The SHA-256 hash of that record names its file in `.groot/commits/`; the current branch ref points to the newest commit. `groot log` follows parent hashes from that ref, newest first. An unchanged index cannot create another commit. The working tree may have unstaged changes when committing; the snapshot uses only staged content.
 
 ## Build and Test
 
@@ -61,9 +69,11 @@ groot status
 groot add hello.txt
 groot status
 groot add .
+groot commit -m "Initial snapshot"
+groot log
 ```
 
-Inspect `.groot/HEAD`, `.groot/index`, `.groot/objects/`, and `.groot/refs/heads/main`. Running `groot init` a second time returns an error instead of replacing metadata. Run `groot status` after editing or deleting `hello.txt` to see the working-tree comparison. The old `.groot` directory in this source checkout uses the earlier prototype format; use a fresh directory for the phase 3 demo.
+Inspect `.groot/HEAD`, `.groot/index`, `.groot/objects/`, `.groot/commits/`, and `.groot/refs/heads/main`. Running `groot init` a second time returns an error instead of replacing metadata. Run `groot status` after editing or deleting `hello.txt` to see the working-tree comparison. The old `.groot` directory in this source checkout uses the earlier prototype format; use a fresh directory for the demo.
 
 ## Algorithms and Costs So Far
 
@@ -73,18 +83,18 @@ Inspect `.groot/HEAD`, `.groot/index`, `.groot/objects/`, and `.groot/refs/heads
 | Store or load *n* bytes | O(n), plus filesystem access | O(n) |
 | Discover at depth *d* | O(d) filesystem checks | O(1) apart from paths |
 | Index lookup/update for *f* paths | O(log f) | O(f) for the loaded map |
+| Commit of *f* indexed files | O(f + total staged file bytes), plus filesystem access | O(f + largest staged file) |
+| Log over *c* commits | O(c + total snapshot entries) | O(c + total snapshot entries) |
 | Status over *f* indexed files and *w* working files | O(f log f + w log f + total file bytes) | O(f + w) |
 
 Hashing and storage operate on whole files for clarity. Large files will need streaming to reduce peak memory. Hard links must be supported by the repository filesystem. A production version would also add stronger crash recovery and concurrent-process testing.
 
 ## Next Phases
 
-4. Immutable snapshot commits and `log`
-5. Full HEAD/index/working-tree status
-6. LCS line diff
-7. Branch references and safe checkout
-8. Commit DAG traversal and merge-base
-9. Fast-forward and three-way merge with conflicts
-10. Error handling, broader tests, and documentation polish
+5. LCS line diff
+6. Branch references and safe checkout
+7. Commit DAG traversal and merge-base
+8. Fast-forward and three-way merge with conflicts
+9. Error handling, broader tests, and documentation polish
 
 Groot is intentionally not Git-compatible. It has no remote synchronization, packfiles, rename detection, binary merge, or garbage collection.

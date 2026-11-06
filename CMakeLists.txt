@@ -19,7 +19,7 @@ target_link_libraries(groot PRIVATE groot_core)
 
 include(CTest)
 if(BUILD_TESTING)
-    add_executable(groot_tests tests/foundation_test.cpp tests/staging_test.cpp)
+    add_executable(groot_tests tests/foundation_test.cpp tests/staging_test.cpp tests/commit_test.cpp)
     target_link_libraries(groot_tests PRIVATE groot_core)
     target_include_directories(groot_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
     add_test(NAME groot_core COMMAND groot_tests)
