@@ -1,0 +1,68 @@
+{
+  "review_date": "2026-11-11",
+  "timezone": "Asia/Calcutta",
+  "scope": "Current working tree; includes pre-existing uncommitted feature work and review fixes",
+  "git_head": "c6d25bc1f44b8da4257272daa3215ce874472960",
+  "platform": "Windows / MinGW",
+  "compiler": "GCC 15.2.0",
+  "cmake": "4.3.1",
+  "build": "Release with -Wall -Wextra -Wpedantic",
+  "catch2": {
+    "test_cases": 20,
+    "assertions": 148,
+    "result": "PASS"
+  },
+  "ctest": {
+    "registered_tests": 1,
+    "passed": 1
+  },
+  "cli": {
+    "result": "PASS",
+    "cli_invocations": 41,
+    "checks": [
+      "CLI validation and repository initialization",
+      "16 SHA-256 boundary/binary vectors match Python hashlib; byte deduplication",
+      "Divergent same-file disjoint merge; dirty checkout protection",
+      "Conflict refusal, abort, staged resolution, and ancestor merge",
+      "Empty-file staged/unstaged deletion",
+      "Corrupt blob prevents publishing a commit"
+    ],
+    "executable": "E:\\GROOT\\build\\interview-verify\\groot.exe",
+    "temporary_repositories_removed": true
+  },
+  "fixes": [
+    "Empty-file additions/deletions visible in diff",
+    "Staging removes incompatible ancestor/descendant entries for file-directory replacements",
+    "Reachability decides fast-forward and up-to-date ancestry before base scoring",
+    "Snapshot destination symlink rejection",
+    "CMake matches Git-tracked Repository.cpp casing"
+  ],
+  "remaining_limits": [
+    "No repository-wide transaction or writer lock",
+    "Simplified general divergent merge-base selection",
+    "No performance benchmark or crash/concurrency/platform matrix",
+    "Destination symlink hardening has no dedicated execution coverage"
+  ],
+  "source_sha256": {
+    "CMakeLists.txt": "7623f3885481e4c60abac5230fed622a8d452900ef9516a42db228ea89d504d0",
+    "include/groot/diff.hpp": "45b64aff9a33c1793846ffe0855381e51f4cd227c442218ae441a75010b53795",
+    "include/groot/index.hpp": "608072a681e8d29fdbc30745e0facff587af98ad69776f52568c6cab791a5806",
+    "include/groot/object_store.hpp": "6af86a2f206da4a16a6a0c24f47292723f23dc7dac30dc55caf305a4e7dfefd2",
+    "include/groot/repository.hpp": "7b1dd87a9c50874a84afaf4ce5b3d9a8858e36dc94c664ca3cdb13472f6a8977",
+    "include/groot/sha256.hpp": "5c1d0b7d0a633bb8cae19f2eb2520f1c58d2c574007b595c95c0fa6eb9a69ab6",
+    "include/groot/utils.hpp": "93f11db30486d2f535a929145019ca95b3d1c813096e4e384f867a5bbf17f831",
+    "README.md": "e4b9dd67790c0edc7c17b5831fc02192ec917b9739c7c65af6116090e1fe4137",
+    "src/diff.cpp": "bae87f4fec3684ac477a2c595647cd9824ba0fcf7a62563ae9f697a50c228672",
+    "src/index.cpp": "b3ea5c855012edc61d514da0e247cf43b20918db6fa4fc1f1b7e5f14fb53b9c8",
+    "src/main.cpp": "37fe5928f35112e32a65ab35dbdfd0f351e4e0471c2b4929ca3ae7c967be19fb",
+    "src/object_store.cpp": "958f7f67e9b270f55f2a7f6f8fda3a97c859f40f3a1421ddd97a1044ab8caff8",
+    "src/Repository.cpp": "bc98935596683118745a6ebd227a40f3310a034934e25228805fe76ab1a86022",
+    "src/sha256.cpp": "77462a877fe9b3c4fa97e11fa8c1b317d58698baf3e73a92405b3ed2f0d7b511",
+    "src/utils.cpp": "b2ddab5f702d31c10fbdf3abefb26ef07c54b50c1254052c3eb6e0fd66988dc8",
+    "tests/commit_test.cpp": "d299b3b6616b1a04443486fb30df0041d5ef629a5af43420fbf57ea33cca33e9",
+    "tests/foundation_test.cpp": "f8764da67c4a3199ba1496577fd6134ad18d912563dc759497a9828ec0faa233",
+    "tests/history_test.cpp": "69da0d360d2cd0311ea4698588a1f5084041178cb47d0a4f42488deae3f871ab",
+    "tests/staging_test.cpp": "a91b22ce93a428897da7af410be919ab2e884cb865f21b0203e95511590fc512",
+    "tools/interview_smoke.py": "6238b48222382babbf312f0e32d6221799d55e4c492e4ef6712d2006f4991dca"
+  }
+}

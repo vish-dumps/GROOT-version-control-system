@@ -7,7 +7,9 @@
 namespace {
 
 void print_status(const groot::Status& status) {
-    std::cout << "On branch " << status.branch << "\n";
+    if (status.detached) std::cout << "HEAD detached at " << status.branch << "\n";
+    else std::cout << "On branch " << status.branch << "\n";
+    if (status.merging) std::cout << "Merge in progress; resolve conflicts and stage files before committing.\n";
     if (!status.staged.empty()) {
         std::cout << "\nChanges staged for commit:\n";
         for (const auto& path : status.staged) {
@@ -34,7 +36,7 @@ void print_status(const groot::Status& status) {
             std::cout << "    " << path << '\n';
         }
     }
-    if (status.staged.empty() && status.staged_modified.empty() && status.staged_deleted.empty() && status.modified.empty() &&
+    if (!status.merging && status.staged.empty() && status.staged_modified.empty() && status.staged_deleted.empty() && status.modified.empty() &&
         status.deleted.empty() && status.untracked.empty()) {
         std::cout << "\nnothing to commit, working tree clean\n";
     }
@@ -44,7 +46,7 @@ void print_status(const groot::Status& status) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: groot <init|add|status|commit|log> [path or -m message]\n";
+        std::cerr << "Usage: groot <init|add|status|diff|commit|log|branch|checkout|merge> [args]\n";
         return 2;
     }
 
@@ -64,8 +66,35 @@ int main(int argc, char* argv[]) {
             for (const auto& record : groot::Repository::log()) {
                 std::cout << "commit " << record.hash << "\n    " << record.message << "\n\n";
             }
+        } else if (command == "diff" && (argc == 2 || (argc == 3 && std::string_view(argv[2]) == "--staged"))) {
+            std::cout << groot::Repository::diff(argc == 3);
+        } else if (command == "branch" && argc == 2) {
+            const auto active = groot::Repository::status().branch;
+            for (const auto& name : groot::Repository::branches())
+                std::cout << (name == active ? "* " : "  ") << name << '\n';
+        } else if (command == "branch" && argc == 3) {
+            groot::Repository::create_branch(argv[2]);
+        } else if (command == "checkout" && argc == 3) {
+            groot::Repository::checkout(argv[2]);
+            const auto state = groot::Repository::status();
+            if (state.detached) std::cout << "HEAD detached at " << state.branch << '\n';
+            else std::cout << "Switched to branch '" << state.branch << "'\n";
+        } else if (command == "merge" && argc == 3 && std::string_view(argv[2]) == "--abort") {
+            groot::Repository::abort_merge();
+            std::cout << "Merge aborted.\n";
+        } else if (command == "merge" && argc == 3) {
+            const auto result = groot::Repository::merge(argv[2]);
+            switch (result.kind) {
+            case groot::MergeResult::Kind::AlreadyUpToDate: std::cout << "Already up to date.\n"; break;
+            case groot::MergeResult::Kind::FastForward: std::cout << "Fast-forward to " << result.hash << '\n'; break;
+            case groot::MergeResult::Kind::Merged: std::cout << "Merge commit " << result.hash << '\n'; break;
+            case groot::MergeResult::Kind::Conflicts:
+                for (const auto& path : result.conflicts) std::cout << "CONFLICT: " << path << '\n';
+                std::cout << "Resolve conflicts, stage files, then commit.\n";
+                break;
+            }
         } else {
-            std::cerr << "Usage: groot <init|add|status|commit|log> [path or -m message]\n";
+            std::cerr << "Usage: groot <init|add|status|diff|commit|log|branch|checkout|merge> [args]\n";
             return 2;
         }
         return 0;

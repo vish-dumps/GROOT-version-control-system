@@ -12,6 +12,8 @@ namespace groot {
 
 struct Status {
     std::string branch;
+    bool detached = false;
+    bool merging = false;
     std::vector<std::string> staged;
     std::vector<std::string> staged_modified;
     std::vector<std::string> staged_deleted;
@@ -23,9 +25,17 @@ struct Status {
 struct Commit {
     std::string hash;
     std::string parent;
+    std::string merge_parent;
     std::int64_t timestamp;
     std::string message;
     std::map<std::string, std::string> files;
+};
+
+struct MergeResult {
+    enum class Kind { AlreadyUpToDate, FastForward, Merged, Conflicts };
+    Kind kind;
+    std::string hash;
+    std::vector<std::string> conflicts;
 };
 
 class Repository {
@@ -44,6 +54,17 @@ public:
     static std::string commit(const std::string& message,
                               const std::filesystem::path& current_directory = std::filesystem::current_path());
     static std::vector<Commit> log(const std::filesystem::path& current_directory = std::filesystem::current_path());
+    static std::string diff(bool staged = false,
+                            const std::filesystem::path& current_directory = std::filesystem::current_path());
+    static std::vector<std::string> branches(
+        const std::filesystem::path& current_directory = std::filesystem::current_path());
+    static void create_branch(const std::string& name,
+                              const std::filesystem::path& current_directory = std::filesystem::current_path());
+    static void checkout(const std::string& name,
+                         const std::filesystem::path& current_directory = std::filesystem::current_path());
+    static MergeResult merge(const std::string& name,
+                             const std::filesystem::path& current_directory = std::filesystem::current_path());
+    static void abort_merge(const std::filesystem::path& current_directory = std::filesystem::current_path());
 };
 
 } // namespace groot

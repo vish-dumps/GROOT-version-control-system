@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "cli_invocations": 41,
+  "checks": [
+    "CLI validation and repository initialization",
+    "16 SHA-256 boundary/binary vectors match Python hashlib; byte deduplication",
+    "Divergent same-file disjoint merge; dirty checkout protection",
+    "Conflict refusal, abort, staged resolution, and ancestor merge",
+    "Empty-file staged/unstaged deletion",
+    "Corrupt blob prevents publishing a commit"
+  ],
+  "executable": "E:\\GROOT\\build\\interview-verify\\groot.exe",
+  "temporary_repositories_removed": true
+}

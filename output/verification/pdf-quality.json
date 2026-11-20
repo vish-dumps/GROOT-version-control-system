@@ -1,0 +1,115 @@
+{
+  "pages": 51,
+  "chapters_and_bookmarks": 20,
+  "answered_questions": 170,
+  "page_boundary_overflows": [],
+  "rendered_pages": 51,
+  "pdf_bytes": 269576,
+  "chapter_pages": [
+    [
+      1,
+      "01 | Start here: what to know cold",
+      3
+    ],
+    [
+      1,
+      "02 | Your CV: claim-by-claim defense",
+      4
+    ],
+    [
+      1,
+      "03 | Introductions, motivation and ownership",
+      7
+    ],
+    [
+      1,
+      "04 | Architecture and repository model",
+      9
+    ],
+    [
+      1,
+      "05 | Command walkthroughs and invariants",
+      11
+    ],
+    [
+      1,
+      "06 | SHA-256 and content-addressed storage",
+      13
+    ],
+    [
+      1,
+      "07 | Index, serialization, commits and history",
+      16
+    ],
+    [
+      1,
+      "08 | Diff: algorithm, edge cases and costs",
+      18
+    ],
+    [
+      1,
+      "09 | Branches, graph traversal and three-way merge",
+      20
+    ],
+    [
+      1,
+      "10 | C++20, STL and implementation decisions",
+      24
+    ],
+    [
+      1,
+      "11 | Complexity and honest performance discussion",
+      27
+    ],
+    [
+      1,
+      "12 | Reliability, security and platform boundaries",
+      30
+    ],
+    [
+      1,
+      "13 | What was verified and what changed",
+      33
+    ],
+    [
+      1,
+      "14 | System-design extensions and tradeoffs",
+      36
+    ],
+    [
+      1,
+      "15 | Tricky questions and depth checks",
+      38
+    ],
+    [
+      1,
+      "16 | Behavioral answers and engineering judgment",
+      42
+    ],
+    [
+      1,
+      "17 | Live demo and troubleshooting playbook",
+      44
+    ],
+    [
+      1,
+      "18 | Whiteboard exercises with worked answers",
+      46
+    ],
+    [
+      1,
+      "19 | Mock interviews and study schedule",
+      48
+    ],
+    [
+      1,
+      "20 | Source catalog, verification commands and glossary",
+      50
+    ]
+  ],
+  "poppler_renderer": "26.09.0",
+  "poppler_rendered_pages": 51,
+  "valid_internal_links": 89,
+  "visual_review": "All 51 pages reviewed as contact sheets; cover, contents, CV, graph, demo and references also checked at full-page scale",
+  "pdf_sha256": "4a3d926c4f5b797450ea32ff9f88e9cf424516d016811e53b671b5a1b50a80f9"
+}
