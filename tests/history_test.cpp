@@ -4,6 +4,7 @@
 #include "groot/repository.hpp"
 #include "groot/utils.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <string>
@@ -97,6 +98,68 @@ TEST_CASE("historical checkout returns to branch tip and supports branching", "[
     groot::Repository::checkout("main", temporary.path);
     REQUIRE(groot::Repository::log(temporary.path).front().hash == latest);
     REQUIRE_THROWS(groot::Repository::checkout("--latest", temporary.path));
+}
+
+TEST_CASE("switch accepts branches and protects the working tree", "[branch]") {
+    HistoryDirectory temporary;
+    temporary.put("a.txt", "base");
+    const auto base = groot::Repository::commit("base", temporary.path);
+    groot::Repository::create_branch("feature", temporary.path);
+
+    REQUIRE_THROWS(groot::Repository::switch_branch(base, temporary.path));
+    REQUIRE_THROWS(groot::Repository::switch_branch("missing", temporary.path));
+    groot::Repository::switch_branch("feature", temporary.path);
+    REQUIRE(groot::Repository::status(temporary.path).branch == "feature");
+
+    groot::write_file(temporary.path / "a.txt", "unsaved");
+    REQUIRE_THROWS(groot::Repository::switch_branch("main", temporary.path));
+    groot::write_file(temporary.path / "a.txt", "base");
+    groot::Repository::switch_branch("main", temporary.path);
+    REQUIRE(groot::Repository::status(temporary.path).branch == "main");
+
+    groot::Repository::checkout(base, temporary.path);
+    REQUIRE(groot::Repository::status(temporary.path).detached);
+    groot::Repository::switch_branch("feature", temporary.path);
+    REQUIRE_FALSE(groot::Repository::status(temporary.path).detached);
+}
+
+TEST_CASE("graph shows both branches and the second parent of a merge", "[graph]") {
+    HistoryDirectory temporary;
+    REQUIRE(groot::Repository::graph(temporary.path) == "No commits yet.\n");
+    REQUIRE(groot::Repository::log_all(temporary.path).empty());
+    temporary.put("base.txt", "base");
+    const auto base = groot::Repository::commit("base", temporary.path);
+    groot::Repository::create_branch("feature", temporary.path);
+    groot::Repository::checkout("feature", temporary.path);
+    temporary.put("feature.txt", "feature");
+    const auto feature = groot::Repository::commit("feature work", temporary.path);
+    groot::Repository::checkout("main", temporary.path);
+    temporary.put("main.txt", "main");
+    const auto main = groot::Repository::commit("main work", temporary.path);
+
+    const auto before_merge = groot::Repository::graph(temporary.path);
+    REQUIRE(before_merge.find(main.substr(0, 12) + " (HEAD -> main) main work") != std::string::npos);
+    REQUIRE(before_merge.find(feature.substr(0, 12) + " (feature) feature work") != std::string::npos);
+    REQUIRE(before_merge.find(base.substr(0, 12) + " base") != std::string::npos);
+    REQUIRE(groot::Repository::log_all(temporary.path).size() == 3);
+
+    const auto merged = groot::Repository::merge("feature", temporary.path);
+    REQUIRE(merged.kind == groot::MergeResult::Kind::Merged);
+    const auto graph = groot::Repository::graph(temporary.path);
+    REQUIRE(graph.find(merged.hash.substr(0, 12) + " (HEAD -> main) Merge branch 'feature'") != std::string::npos);
+    REQUIRE(graph.find("\\ ") != std::string::npos);
+    REQUIRE(graph.find(feature.substr(0, 12) + " (feature) feature work") != std::string::npos);
+    REQUIRE(graph.find(base.substr(0, 12) + " base") != std::string::npos);
+    REQUIRE(groot::Repository::log(temporary.path).size() == 3); // First-parent log omits the feature commit.
+    const auto all = groot::Repository::log_all(temporary.path);
+    REQUIRE(all.size() == 4);
+    REQUIRE(all.front().hash == merged.hash);
+    REQUIRE(all.back().hash == base);
+    REQUIRE(std::count_if(all.begin(), all.end(), [&](const auto& record) { return record.hash == feature; }) == 1);
+
+    groot::Repository::checkout(base, temporary.path);
+    REQUIRE(groot::Repository::graph(temporary.path).find("HEAD detached") != std::string::npos);
+    REQUIRE(groot::Repository::log_all(temporary.path).size() == 4);
 }
 
 TEST_CASE("checkout handles file and directory path transitions", "[branch]") {

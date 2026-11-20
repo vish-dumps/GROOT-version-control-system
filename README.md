@@ -84,6 +84,7 @@ Useful checks while editing:
 | `groot diff` | Changes between staged files and files in the working folder. |
 | `groot diff --staged` | Changes between the current commit and the staging area. |
 | `groot log` | Commit hashes and messages, newest first, along the current line of history. |
+| `groot log --all` | Full hashes and messages for commits reachable from any branch. |
 
 ## Visit an older commit, then come back
 
@@ -115,10 +116,10 @@ To make a new line of work starting from `second`:
 ```powershell
 groot checkout <hash-of-second-commit>
 groot branch experiment
-groot checkout experiment
+groot switch experiment
 ```
 
-`groot branch experiment` creates a **pointer** named `experiment` at the commit you are viewing; it does not duplicate the project folder. `groot checkout experiment` makes that branch active. Now edits and commits advance `experiment`, while `main` stays at `fourth`:
+`groot branch experiment` creates a **pointer** named `experiment` at the commit you are viewing; it does not duplicate the project folder. `groot switch experiment` makes that branch active. Now edits and commits advance `experiment`, while `main` stays at `fourth`:
 
 ```text
 first -> second -> third -> fourth    main
@@ -126,14 +127,14 @@ first -> second -> third -> fourth    main
              -> new work             experiment
 ```
 
-Run `groot branch` to list branches. The `*` marks the active branch. You can also branch from the current latest commit: run `groot branch <name>` while on `main`, then `groot checkout <name>`. To return from an active branch, use `groot checkout main`; `--latest` is for the detached historical view.
+Run `groot branch` to list branches. The `*` marks the active branch. You can also branch from the current latest commit: run `groot branch <name>` while on `main`, then `groot switch <name>`. To return from an active branch, use `groot switch main`; `groot checkout --latest` is for the detached historical view. `switch` accepts branch names only; `checkout` also accepts commit hashes.
 
 ## Merge a branch into `main`
 
 A merge brings changes from another branch into the branch you are currently on. First finish and commit your work on both branches. Then switch to the destination branch:
 
 ```powershell
-groot checkout main
+groot switch main
 groot merge experiment
 groot status
 ```
@@ -147,7 +148,22 @@ Two common outcomes:
 | `main` has not advanced since `experiment` branched | **Fast-forward:** `main` moves to the experiment commit. No new merge commit is needed. |
 | Both branches have new commits | **Divergent merge:** Groot combines the snapshots and creates a merge commit with two parents. |
 
-Merging does not delete the other branch. `groot log` follows the first parent of each commit, so a merged branch's individual commits may not appear in `main`'s log even though their changes are in the merge result.
+Merging does not delete the other branch. `groot log` follows the first parent of each commit, so a merged branch's individual commits may not appear in `main`'s log even though their changes are in the merge result. Use `groot log --all` to list commits from every branch, including both parents of merges, with full hashes. Each commit appears once.
+
+## See branches and merges in the terminal
+
+Run `groot log --graph` from any folder inside your Groot repository. It shows commits reachable from **all branches**, including both sides of a merge. Use `groot log --all` when you want the same history as a plain list with full hashes:
+
+```text
+* a1b2c3d4e5f6 (HEAD -> main) Merge branch 'feature'
+| \
+* | b2c3d4e5f6a1 main work
+| * c3d4e5f6a1b2 (feature) feature work
+| /
+* d4e5f6a1b2c3 base
+```
+
+Each `*` is a commit. The lines show how its history connects to older commits; the split at the top is the merge, and the lines meet again at the shared ancestor. `(HEAD -> main)` marks the branch you are viewing, while `(feature)` marks the other branch's tip. The graph uses short hashes to keep lines readable. Checkout still needs a full hash: copy it from `groot log --all`.
 
 ## What if both branches change the same lines?
 
@@ -183,7 +199,10 @@ Binary conflicts and file-versus-directory path conflicts are rejected rather th
 | `groot diff` / `groot diff --staged` | Inspect working or staged changes. |
 | `groot commit -m "message"` | Save a snapshot of staged files. |
 | `groot log` | List commits on the current first-parent history. |
+| `groot log --all` | List full hashes for commits reachable from every branch. |
+| `groot log --graph` | Draw commits from every branch, including merge connections. |
 | `groot branch` / `groot branch <name>` | List branches or create one at the current commit. |
+| `groot switch <branch>` | Switch to an existing branch. |
 | `groot checkout <branch>` | Switch to a branch. |
 | `groot checkout <full-commit-hash>` | View a saved snapshot directly. |
 | `groot checkout --latest` | Return from a detached commit to the branch you left. |

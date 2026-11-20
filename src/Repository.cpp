@@ -13,6 +13,7 @@
 #include <deque>
 #include <iomanip>
 #include <limits>
+#include <queue>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -200,6 +201,20 @@ Commit load_commit(const fs::path& root, const std::string& hash) {
     }
     if (serialize_commit(result) != bytes) throw std::runtime_error("noncanonical commit record");
     return result;
+}
+
+std::map<std::string, Commit> collect_commits(const fs::path& root, std::vector<std::string> pending) {
+    std::map<std::string, Commit> commits;
+    while (!pending.empty()) {
+        auto hash = pending.back();
+        pending.pop_back();
+        if (hash.empty() || commits.contains(hash)) continue;
+        const auto record = load_commit(root, hash);
+        if (!record.parent.empty()) pending.push_back(record.parent);
+        if (!record.merge_parent.empty()) pending.push_back(record.merge_parent);
+        commits.emplace(hash, record);
+    }
+    return commits;
 }
 
 std::string save_commit(const fs::path& root, const Commit& record) {
@@ -595,6 +610,142 @@ std::vector<Commit> Repository::log(const fs::path& current_directory) {
     return history;
 }
 
+std::vector<Commit> Repository::log_all(const fs::path& current_directory) {
+    const auto root = require_root(current_directory);
+    std::vector<std::string> tips{head_tip(root)};
+    for (const auto& name : Repository::branches(root)) tips.push_back(branch_tip(root, name));
+    const auto commits = collect_commits(root, std::move(tips));
+
+    std::map<std::string, std::size_t> children_left;
+    for (const auto& [hash, record] : commits) children_left.emplace(hash, 0);
+    for (const auto& [hash, record] : commits) {
+        if (!record.parent.empty()) ++children_left.at(record.parent);
+        if (!record.merge_parent.empty() && record.merge_parent != record.parent)
+            ++children_left.at(record.merge_parent);
+    }
+
+    using Ready = std::pair<std::int64_t, std::string>;
+    std::priority_queue<Ready> ready;
+    for (const auto& [hash, count] : children_left)
+        if (count == 0) ready.emplace(commits.at(hash).timestamp, hash);
+
+    std::vector<Commit> history;
+    history.reserve(commits.size());
+    while (!ready.empty()) {
+        const auto hash = ready.top().second;
+        ready.pop();
+        const auto& record = commits.at(hash);
+        history.push_back(record);
+        const auto release = [&](const std::string& parent) {
+            if (!parent.empty() && --children_left.at(parent) == 0)
+                ready.emplace(commits.at(parent).timestamp, parent);
+        };
+        release(record.parent);
+        if (record.merge_parent != record.parent) release(record.merge_parent);
+    }
+    if (history.size() != commits.size()) throw std::runtime_error("cycle in commit history");
+    return history;
+}
+
+std::string Repository::graph(const fs::path& current_directory) {
+    const auto root = require_root(current_directory);
+    const auto detached = detached_head(root);
+    const auto current = detached ? std::string{} : current_branch(root);
+    const auto head = head_tip(root);
+
+    std::vector<std::string> tips;
+    std::map<std::string, std::vector<std::string>> labels;
+    if (!head.empty()) {
+        tips.push_back(head);
+        if (detached) labels[head].push_back("HEAD detached");
+    }
+    for (const auto& name : Repository::branches(root)) {
+        const auto tip = branch_tip(root, name);
+        if (tip.empty()) continue;
+        labels[tip].push_back(name == current ? "HEAD -> " + name : name);
+        if (std::find(tips.begin(), tips.end(), tip) == tips.end()) tips.push_back(tip);
+    }
+    if (tips.empty()) return "No commits yet.\n";
+
+    // Include both parents of merges and commits reachable from every branch.
+    const auto commits = collect_commits(root, tips);
+
+    // A commit is drawn only after all of its visible children. This keeps
+    // arrows pointing downward toward older commits, including merge parents.
+    std::map<std::string, std::size_t> children_left;
+    for (const auto& [hash, record] : commits) children_left.emplace(hash, 0);
+    for (const auto& [hash, record] : commits) {
+        if (!record.parent.empty()) ++children_left.at(record.parent);
+        if (!record.merge_parent.empty() && record.merge_parent != record.parent)
+            ++children_left.at(record.merge_parent);
+    }
+
+    std::set<std::string> drawn;
+    std::ostringstream output;
+    std::vector<std::string> lanes{tips.front()};
+    while (drawn.size() < commits.size()) {
+        std::size_t lane = 0;
+        while (lane < lanes.size() && children_left.at(lanes[lane]) != 0) ++lane;
+        if (lane == lanes.size()) {
+            // A branch that has not merged yet starts a new visible lane.
+            const auto next = std::find_if(tips.begin(), tips.end(), [&](const auto& tip) {
+                return !drawn.contains(tip) && children_left.at(tip) == 0 &&
+                    std::find(lanes.begin(), lanes.end(), tip) == lanes.end();
+            });
+            if (next == tips.end()) throw std::runtime_error("cycle in commit history");
+            for (std::size_t i = 0; i < lanes.size(); ++i) output << "| ";
+            output << "\\\n";
+            lanes.push_back(*next);
+            continue;
+        }
+
+        const auto hash = lanes[lane];
+        const auto& record = commits.at(hash);
+        for (std::size_t i = 0; i < lanes.size(); ++i) output << (i == lane ? "* " : "| ");
+        output << hash.substr(0, 12);
+        if (const auto found = labels.find(hash); found != labels.end()) {
+            output << " (";
+            for (std::size_t i = 0; i < found->second.size(); ++i) {
+                if (i) output << ", ";
+                output << found->second[i];
+            }
+            output << ')';
+        }
+        output << ' ' << record.message << '\n';
+        drawn.insert(hash);
+
+        if (!record.parent.empty()) --children_left.at(record.parent);
+        if (!record.merge_parent.empty() && record.merge_parent != record.parent)
+            --children_left.at(record.merge_parent);
+
+        if (record.parent.empty()) lanes.erase(lanes.begin() + lane);
+        else lanes[lane] = record.parent;
+        if (!record.merge_parent.empty() && record.merge_parent != record.parent) {
+            if (std::find(lanes.begin(), lanes.end(), record.merge_parent) == lanes.end())
+                lanes.insert(lanes.begin() + lane + (record.parent.empty() ? 0 : 1), record.merge_parent);
+            for (std::size_t i = 0; i < lanes.size(); ++i)
+                output << (i == lane + 1 ? "\\ " : "| ");
+            output << '\n';
+        }
+
+        std::set<std::string> seen;
+        std::vector<std::string> unique;
+        bool joined = false;
+        for (const auto& active : lanes) {
+            if (seen.insert(active).second) unique.push_back(active);
+            else joined = true;
+        }
+        if (joined) {
+            seen.clear();
+            for (const auto& active : lanes)
+                output << (seen.insert(active).second ? "| " : "/ ");
+            output << '\n';
+        }
+        lanes = std::move(unique);
+    }
+    return output.str();
+}
+
 std::string Repository::diff(bool staged, const fs::path& current_directory) {
     const auto root = require_root(current_directory);
     Index index(root);
@@ -702,6 +853,14 @@ void Repository::checkout(const std::string& name, const fs::path& current_direc
         if (!detached) write_file(return_path, current_branch(root) + "\n");
         write_file(root / ".groot" / "HEAD", "commit: " + target_hash + "\n");
     }
+}
+
+void Repository::switch_branch(const std::string& name, const fs::path& current_directory) {
+    const auto root = require_root(current_directory);
+    const auto ref = named_branch_ref(root, name);
+    if (!fs::is_regular_file(ref) || fs::is_symlink(ref))
+        throw std::runtime_error("branch does not exist: " + name);
+    Repository::checkout(name, root);
 }
 
 MergeResult Repository::merge(const std::string& name, const fs::path& current_directory) {

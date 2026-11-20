@@ -46,7 +46,7 @@ void print_status(const groot::Status& status) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: groot <init|add|status|diff|commit|log|branch|checkout|merge> [args]\n";
+        std::cerr << "Usage: groot <init|add|status|diff|commit|log|branch|checkout|switch|merge> [args]\n";
         return 2;
     }
 
@@ -62,10 +62,13 @@ int main(int argc, char* argv[]) {
             print_status(groot::Repository::status());
         } else if (command == "commit" && argc == 4 && std::string_view(argv[2]) == "-m") {
             std::cout << "Committed " << groot::Repository::commit(argv[3]) << '\n';
-        } else if (command == "log" && argc == 2) {
-            for (const auto& record : groot::Repository::log()) {
+        } else if (command == "log" && (argc == 2 || (argc == 3 && std::string_view(argv[2]) == "--all"))) {
+            const auto history = argc == 2 ? groot::Repository::log() : groot::Repository::log_all();
+            for (const auto& record : history) {
                 std::cout << "commit " << record.hash << "\n    " << record.message << "\n\n";
             }
+        } else if (command == "log" && argc == 3 && std::string_view(argv[2]) == "--graph") {
+            std::cout << groot::Repository::graph();
         } else if (command == "diff" && (argc == 2 || (argc == 3 && std::string_view(argv[2]) == "--staged"))) {
             std::cout << groot::Repository::diff(argc == 3);
         } else if (command == "branch" && argc == 2) {
@@ -79,6 +82,9 @@ int main(int argc, char* argv[]) {
             const auto state = groot::Repository::status();
             if (state.detached) std::cout << "HEAD detached at " << state.branch << '\n';
             else std::cout << "Switched to branch '" << state.branch << "'\n";
+        } else if (command == "switch" && argc == 3) {
+            groot::Repository::switch_branch(argv[2]);
+            std::cout << "Switched to branch '" << argv[2] << "'\n";
         } else if (command == "merge" && argc == 3 && std::string_view(argv[2]) == "--abort") {
             groot::Repository::abort_merge();
             std::cout << "Merge aborted.\n";
@@ -94,7 +100,7 @@ int main(int argc, char* argv[]) {
                 break;
             }
         } else {
-            std::cerr << "Usage: groot <init|add|status|diff|commit|log|branch|checkout|merge> [args]\n";
+            std::cerr << "Usage: groot <init|add|status|diff|commit|log|branch|checkout|switch|merge> [args]\n";
             return 2;
         }
         return 0;
