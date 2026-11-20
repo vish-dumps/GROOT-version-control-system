@@ -1,68 +1,197 @@
 # Groot
 
-A lightweight Git-inspired version control system implemented from scratch in C++20. Groot supports repository initialization, SHA-256 content storage, staging, snapshot commits, status, line diffs, branches, safe checkout, and three-way merging.
+Groot is a small, local version control system written in C++20. It lets you save versions of a folder, inspect earlier versions, work on branches, and combine branches. It is a learning project inspired by Git; it does not use Git internally.
 
-## Why I Built It
+This guide starts with the ideas behind the commands. You do not need to know Git or C++ to follow it.
 
-Groot is an interview project for understanding how a version control system stores content and builds history. The implementation uses the filesystem directly and does not invoke Git or libgit2 for version-control operations.
+## The idea in one minute
 
-## Current Architecture
+Imagine writing a document. You save a version today, change it tomorrow, and later want to see what it looked like today. Groot keeps those saved versions, called **commits**. A **branch** is a named line of commits, so you can try a change without moving your main line of work. A **merge** combines work from two branches.
 
-```text
-groot init -> Repository -> .groot/{objects,commits,refs/heads,HEAD,index}
+Groot has three places to think about:
 
-groot add -> Repository -> ObjectStore -> SHA256 -> .groot/objects/<digest>
-                       \-> Index       -> .groot/index
+| Place | Meaning |
+| --- | --- |
+| Working folder | The files you see and edit in VS Code. |
+| Staging area (the index) | The file versions you have chosen for the next commit. |
+| Commit history | Snapshots you have already saved. |
 
-groot status -> compare Index with working files
+The everyday cycle is **edit -> add -> commit**. Editing changes your working folder. `groot add` copies the current file content into Groot's object store and records it in the staging area. `groot commit` saves a snapshot of the staging area.
 
-groot commit -> snapshot Index -> .groot/commits/<digest> -> refs/heads/main
+## What is a blob?
 
-groot log -> follow commit parent hashes from the branch ref
-
-groot diff -> compare working tree with Index (or Index with HEAD)
-
-groot checkout -> restore a branch snapshot and switch HEAD
-
-groot merge -> find a common ancestor and combine snapshots
-```
-
-`Repository::discover` walks from a directory to its parents looking for `.groot`. `Repository::init` creates an empty `main` branch, a symbolic `HEAD`, and an empty index. The object store takes arbitrary bytes, computes SHA-256, and stores the bytes under the digest. The same bytes always select the same object path, so identical content is stored once. Objects are published from a temporary file with a hard link; an existing hash path is never overwritten by `ObjectStore::store`. `load` verifies the digest and reports corruption.
+A **blob** is stored file content: the bytes inside a file. If `hello.txt` contains `hello`, its blob contains those five bytes. The file name is recorded separately. Groot stores blobs in `.groot/objects/` and names each one with a SHA-256 **hash**, a long string calculated from its content.
 
 ```text
-project/.groot/
-├── objects/          # SHA-256-named immutable file contents
-├── commits/          # SHA-256-named immutable snapshot records
-├── refs/heads/main    # latest commit hash, empty until the first commit
-├── HEAD               # ref: refs/heads/main
-└── index              # sorted path -> object hash entries
+hello.txt -> content: hello -> hash: 2cf24dba... -> .groot/objects/2cf24dba...
 ```
 
-SHA-256 is the *identity* of stored content, not a random identifier. For example, `hello` hashes to `2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824`. Two files containing those same five bytes can refer to one object. The implementation accepts binary bytes, including NUL bytes.
+The example hash is for exactly `hello` without a newline. Commands such as `echo` or `Set-Content` usually add a newline, which produces a different hash. If two files have identical content, they can refer to the same stored blob. Changing one byte produces a different hash. Groot checks the hash when loading an object, so it can detect corrupted content.
 
-## Staging and Status
+A **commit** does not need to contain a fresh copy of every file. It records which file path points to which blob, along with a message, time, and parent commit. Each commit also has its own hash.
 
-The index is a `std::map<path, hash>` serialized in sorted order to `.groot/index`. Each line contains a 64-character SHA-256 hash and a quoted repository-relative path. `groot add <file>` stores the file's current bytes as an immutable object and updates that path's hash in the index. It does not create a commit. `groot add .` recursively stages files under the current directory and removes missing indexed files in that subtree. Groot skips `.groot`, `.git`, and symbolic links while scanning.
+## What does `groot init` create?
 
-`groot status` compares the latest commit with the index to report staged additions, modifications, and deletions. It also hashes indexed working files to find unstaged modifications, checks for missing indexed files, and scans for untracked files. A deleted file stays in the index until it is staged for removal with `groot add <file>` or `groot add .`.
+Run `groot init` from the folder you want to track. It creates a hidden `.groot` directory there:
 
-## Commits and History
+```text
+your-project/
+  your files...
+  .groot/
+    objects/          stored file content (blobs)
+    commits/          saved snapshot records
+    index             file versions staged for the next commit
+    refs/heads/main   hash of the latest commit on main
+    HEAD              the branch or historical commit you are viewing
+```
 
-`groot commit -m "message"` captures the complete index as a snapshot. Each commit records its parent hash, optional merge parent hash, timestamp, message, and sorted path-to-object mappings. The SHA-256 hash of that record names its file in `.groot/commits/`; the current branch ref points to the newest commit. `groot log` follows first-parent hashes from that ref, newest first. An unchanged index cannot create a normal commit. The working tree may have unstaged changes when committing; the snapshot uses only staged content.
+`init` uses the terminal's current folder; it does not take a folder argument. The folder must already exist. Groot refuses to initialize a folder inside another Groot repository. You run `init` only once per project.
 
-## Diff, Branches, and Merge
+Groot and Git can exist in the same folder. Git uses `.git`; Groot uses `.groot`. If you use both, add `.groot/` to `.gitignore` so Git does not track Groot's data. Groot skips `.git` and `.groot` while scanning files.
 
-`groot diff` compares indexed files with the working tree. `groot diff --staged` compares the latest commit with the index. Text diffs use an LCS line comparison and show unified whole-file hunks; binary changes are reported without displaying bytes. Untracked files do not appear in `diff` until staged.
+## Save your first version
 
-`groot branch` lists branches; `groot branch <name>` creates one at the current commit. `groot checkout <name>` switches branches and restores the target snapshot. Checkout refuses staged or unstaged tracked changes and refuses to overwrite untracked files. Branch names use letters, digits, dots, underscores, and hyphens.
+The examples below assume the `groot` command is available in your terminal. Start in a new folder outside any existing Groot repository:
 
-`groot checkout <commit-hash>` restores a historical snapshot in detached HEAD mode without moving the branch. Use a full hash from `groot log`. `groot checkout --latest` returns to the latest commit of the branch you left. To start new work from an older commit, run `groot branch <new-name>` while detached, then `groot checkout <new-name>`. Committing and merging require an active branch. The same clean-working-tree and untracked-file checks apply to historical checkout.
+```powershell
+mkdir my-groot-demo
+cd my-groot-demo
+groot init
 
-`groot merge <name>` finds a common ancestor across both parent links. It fast-forwards when possible. For divergent histories, it merges changes by path and combines non-overlapping line edits to the same text file. A successful divergent merge creates a two-parent commit. Overlapping text edits produce conflict markers in the working tree and `.groot/MERGE_HEAD` records the other parent. Resolve each conflict, run `groot add <file>` (or stage a deletion), then `groot commit -m "message"`. `groot merge --abort` restores the pre-merge snapshot. Binary conflicts and file/directory path conflicts are rejected before changing the working tree.
+"Hello" | Set-Content note.txt
+groot status
+groot add note.txt
+groot status
+groot commit -m "Add my first note"
+groot log
+```
 
-## Build and Test
+Here is what happened:
 
-Requires a C++20 compiler and CMake 3.20 or later. Catch2 v2.13.10 is vendored in `third_party/` for offline tests.
+1. `groot init` created the repository metadata.
+2. You created `note.txt` in the working folder. `status` reported it as **untracked** because Groot had not been asked to save it.
+3. `groot add note.txt` stored its content as a blob and put `note.txt -> blob hash` in the index. `status` then reported a **staged** new file.
+4. `groot commit -m ...` saved the index as a commit. The `main` branch now points to that commit.
+5. `groot log` displayed the commit hash and message.
+
+`groot add .` stages files under the current folder, including tracked deletions. `groot add <file>` stages one file. Running `add` again after editing a file updates the staged version. A commit uses the staged content, even if you make another unstaged edit afterward.
+
+Useful checks while editing:
+
+| Command | What it shows |
+| --- | --- |
+| `groot status` | Untracked files, staged changes, and tracked changes that are not staged. |
+| `groot diff` | Changes between staged files and files in the working folder. |
+| `groot diff --staged` | Changes between the current commit and the staging area. |
+| `groot log` | Commit hashes and messages, newest first, along the current line of history. |
+
+## Visit an older commit, then come back
+
+`groot log` prints full commit hashes. Copy one and run:
+
+```powershell
+groot status
+groot checkout <full-commit-hash>
+groot status
+groot checkout --latest
+```
+
+Replace `<full-commit-hash>` with an actual hash; do not type the angle brackets. The first checkout restores the older snapshot in your working folder. Groot calls this **detached HEAD**: you are looking at a commit directly, while your branch still points to its latest commit. `checkout --latest` returns to the branch you left and restores its current tip.
+
+Checkout refuses staged or unstaged tracked changes and refuses to overwrite an untracked file. Run `groot status` first. Save work with `groot add` and `groot commit` before switching. Groot does not yet provide `stash` or `unstage` commands.
+
+You cannot commit or merge while detached. To start new work from that older commit, create and check out a branch as shown next.
+
+## Branch from an older commit
+
+Suppose your history is:
+
+```text
+first -> second -> third -> fourth    main
+```
+
+To make a new line of work starting from `second`:
+
+```powershell
+groot checkout <hash-of-second-commit>
+groot branch experiment
+groot checkout experiment
+```
+
+`groot branch experiment` creates a **pointer** named `experiment` at the commit you are viewing; it does not duplicate the project folder. `groot checkout experiment` makes that branch active. Now edits and commits advance `experiment`, while `main` stays at `fourth`:
+
+```text
+first -> second -> third -> fourth    main
+            \
+             -> new work             experiment
+```
+
+Run `groot branch` to list branches. The `*` marks the active branch. You can also branch from the current latest commit: run `groot branch <name>` while on `main`, then `groot checkout <name>`. To return from an active branch, use `groot checkout main`; `--latest` is for the detached historical view.
+
+## Merge a branch into `main`
+
+A merge brings changes from another branch into the branch you are currently on. First finish and commit your work on both branches. Then switch to the destination branch:
+
+```powershell
+groot checkout main
+groot merge experiment
+groot status
+```
+
+Groot finds the most suitable shared ancestor of the two branch tips and compares three snapshots: the ancestor, `main`, and `experiment`. It combines changes made on only one side. If both sides changed different parts of a text file, Groot attempts to combine those edits too.
+
+Two common outcomes:
+
+| Situation | Result |
+| --- | --- |
+| `main` has not advanced since `experiment` branched | **Fast-forward:** `main` moves to the experiment commit. No new merge commit is needed. |
+| Both branches have new commits | **Divergent merge:** Groot combines the snapshots and creates a merge commit with two parents. |
+
+Merging does not delete the other branch. `groot log` follows the first parent of each commit, so a merged branch's individual commits may not appear in `main`'s log even though their changes are in the merge result.
+
+## What if both branches change the same lines?
+
+Groot cannot always decide which version you intended. For overlapping text changes, it leaves **conflict markers** in the affected file. The markers below are indented for display; in the file they begin at the start of each line:
+
+```text
+  <<<<<<< HEAD
+text from your current branch
+  =======
+text from the branch being merged
+  >>>>>>> experiment
+```
+
+`HEAD` here means the branch you were on when you ran `merge`. Open the file in VS Code, choose or combine the text you want, and remove the marker lines. Then save the file and finish the merge:
+
+```powershell
+groot status
+groot add path/to/conflicted-file.txt
+groot commit -m "Resolve merge conflict"
+```
+
+Stage every conflicted file before committing. Groot records the other branch in `.groot/MERGE_HEAD` during this process and removes that temporary merge state after the resolution commit. If you want to cancel the merge instead, run `groot merge --abort`; it restores the state from before the merge and discards conflict-resolution edits.
+
+Binary conflicts and file-versus-directory path conflicts are rejected rather than merged automatically. A checkout or merge may also stop if an untracked file would be overwritten.
+
+## Command reference
+
+| Command | Purpose |
+| --- | --- |
+| `groot init` | Start tracking the current folder. |
+| `groot add <file>` / `groot add .` | Stage file content or deletions. |
+| `groot status` | See what changed and what is staged. |
+| `groot diff` / `groot diff --staged` | Inspect working or staged changes. |
+| `groot commit -m "message"` | Save a snapshot of staged files. |
+| `groot log` | List commits on the current first-parent history. |
+| `groot branch` / `groot branch <name>` | List branches or create one at the current commit. |
+| `groot checkout <branch>` | Switch to a branch. |
+| `groot checkout <full-commit-hash>` | View a saved snapshot directly. |
+| `groot checkout --latest` | Return from a detached commit to the branch you left. |
+| `groot merge <branch>` / `groot merge --abort` | Merge a branch or cancel a merge in progress. |
+
+## Build and run
+
+You need CMake 3.20 or later and a C++20 compiler. Catch2 is included in `third_party/`, so tests can run offline.
 
 ```sh
 cmake -S . -B build
@@ -70,49 +199,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-When running a MinGW build outside its IDE, put the compiler's `bin` directory on `PATH` so Windows can find its runtime DLLs. The tests create and remove their own directories in the system temporary directory. They do not initialize or modify this source repository.
+The executable is normally `build/groot` or `build/groot.exe`, depending on your platform and build generator. Add its directory to your terminal's `PATH` to run `groot` from any project folder. On Windows with MinGW, make sure the matching compiler `bin` directory comes before incompatible MinGW runtime DLLs on `PATH`.
 
-## Try the CLI
+## Notes for curious developers
 
-Run these commands in a **new, empty directory** with the built `groot` executable on `PATH`:
+Groot stores file bytes under SHA-256 hashes in `.groot/objects/`. The sorted index maps repository-relative paths to those hashes. A commit stores a complete path-to-hash snapshot, its message and time, and one or two parent hashes. Its own serialized bytes are also SHA-256 hashed and stored in `.groot/commits/`. Branch refs store the commit hashes; `HEAD` identifies the active branch or a detached commit. Checkout updates the working files and index to match the target snapshot. Merge compares snapshots through their shared commit ancestry.
 
-```sh
-mkdir demo
-cd demo
-groot init
-echo hello > hello.txt
-groot status
-groot add hello.txt
-groot status
-groot add .
-groot commit -m "Initial snapshot"
-groot log
-groot branch feature
-groot checkout feature
-echo more > feature.txt
-groot add feature.txt
-groot commit -m "Add feature"
-groot checkout main
-groot merge feature
-groot diff --staged
-```
-
-Inspect `.groot/HEAD`, `.groot/index`, `.groot/objects/`, `.groot/commits/`, and `.groot/refs/heads/main`. Running `groot init` a second time returns an error instead of replacing metadata. Run `groot status` after editing or deleting `hello.txt` to see the working-tree comparison. The old `.groot` directory in this source checkout uses the earlier prototype format; use a fresh directory for the demo.
-
-## Algorithms and Costs So Far
-
-| Operation | Time | Extra memory |
-| --- | --- | --- |
-| SHA-256 of *n* bytes | O(n) | O(n) for padded input |
-| Store or load *n* bytes | O(n), plus filesystem access | O(n) |
-| Discover at depth *d* | O(d) filesystem checks | O(1) apart from paths |
-| Index lookup/update for *f* paths | O(log f) | O(f) for the loaded map |
-| Commit of *f* indexed files | O(f + total staged file bytes), plus filesystem access | O(f + largest staged file) |
-| Log over *c* first-parent commits | O(c + total snapshot entries) | O(c + total snapshot entries) |
-| Status over *f* indexed files and *w* working files | O(f log f + w log f + total file bytes) | O(f + w) |
-| LCS diff or same-file merge of *a* and *b* lines | O(a × b) | O(a × b) |
-| Merge-base search over *c* ancestors | O(c + total snapshot entries) | O(c) for distances |
-
-Hashing and storage operate on whole files for clarity. Large files will need streaming to reduce peak memory. Hard links must be supported by the repository filesystem. A production version would also add stronger crash recovery and concurrent-process testing.
-
-Groot is intentionally not Git-compatible. It has no remote synchronization, packfiles, rename detection, binary merge, or garbage collection. The current design is for local, single-process use; concurrent writers and crash recovery are not yet guaranteed. The quadratic LCS implementation limits very large text diffs and merges.
+Groot is intentionally not Git-compatible. It has no remotes, push/pull, stash, reset, unstage, rename detection, binary merge, or garbage collection. It is intended for local, single-process use; concurrent writers and crash recovery are not guaranteed. Whole-file hashing and a quadratic text diff/merge algorithm make very large files less practical.
